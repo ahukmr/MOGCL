@@ -56,7 +56,7 @@ class MOGCL(GeneralRecommender):
         self.restore_item_e = None
 
         self.acc_norm_adj_mat = self.acc_get_norm_adj_mat().to(self.device)
-        self.div_norm_adj_mat = self.div_get_norm_adj_mat().to(self.device)
+        self.nacc_norm_adj_mat = self.nacc_get_norm_adj_mat().to(self.device)
 
         # parameters initialization
         self.apply(xavier_uniform_initialization)
@@ -93,7 +93,7 @@ class MOGCL(GeneralRecommender):
         A._update(data_dict)
         # norm adj matrix
         sumArr = (A > 0).sum(axis=1)
-        # add epsilon to avoid divide by zero Warning
+        # add epsilon to avoid naccide by zero Warning
         diag = np.array(sumArr.flatten())[0] + 1e-7
         diag = np.power(diag, -0.5)
         self.diag = torch.from_numpy(diag).to(self.device)
@@ -108,7 +108,7 @@ class MOGCL(GeneralRecommender):
         SparseL = torch.sparse_coo_tensor(i, data, torch.Size(L.shape))
         return SparseL
 
-    def div_get_norm_adj_mat(self):
+    def nacc_get_norm_adj_mat(self):
         r"""Get the normalized interaction matrix of users and items.
 
         Construct the square matrix from the training data and normalize it
@@ -163,38 +163,38 @@ class MOGCL(GeneralRecommender):
     def forward(self):
         acc_all_embeddings = self.get_ego_embeddings()
         acc_embeddings_list = [acc_all_embeddings]
-        div_all_embeddings = self.get_ego_embeddings()
-        div_embeddings_list = [div_all_embeddings]
+        nacc_all_embeddings = self.get_ego_embeddings()
+        nacc_embeddings_list = [nacc_all_embeddings]
         for layer_idx in range(self.n_layers):
             acc_all_embeddings = torch.sparse.mm(self.acc_norm_adj_mat, acc_all_embeddings)
-            div_all_embeddings = torch.sparse.mm(self.div_norm_adj_mat, div_all_embeddings)
+            nacc_all_embeddings = torch.sparse.mm(self.nacc_norm_adj_mat, nacc_all_embeddings)
             acc_embeddings_list.append(acc_all_embeddings)    # 得到每一layer的embedding
-            div_embeddings_list.append(div_all_embeddings)
+            nacc_embeddings_list.append(nacc_all_embeddings)
         lightgcn_acc_all_embeddings = torch.stack(acc_embeddings_list[:self.n_layers+1], dim=1)   # 沿着一个新维度对输入张量序列进行连接。 序列中所有的张量都应该为相同形状。
         lightgcn_acc_all_embeddings = torch.mean(lightgcn_acc_all_embeddings, dim=1)
 
         user_acc_all_embeddings, item_acc_all_embeddings = torch.split(lightgcn_acc_all_embeddings, [self.n_users, self.n_items])
 
-        lightgcn_div_all_embeddings = torch.stack(div_embeddings_list[:self.n_layers + 1],
+        lightgcn_nacc_all_embeddings = torch.stack(nacc_embeddings_list[:self.n_layers + 1],
                                                   dim=1)
-        lightgcn_div_all_embeddings = torch.mean(lightgcn_div_all_embeddings, dim=1)
+        lightgcn_nacc_all_embeddings = torch.mean(lightgcn_nacc_all_embeddings, dim=1)
 
-        user_div_all_embeddings, item_div_all_embeddings = torch.split(lightgcn_div_all_embeddings,
+        user_nacc_all_embeddings, item_nacc_all_embeddings = torch.split(lightgcn_nacc_all_embeddings,
                                                                [self.n_users, self.n_items])
-        user_fil_emb = self.catweight * user_acc_all_embeddings + (1 - self.catweight) * user_div_all_embeddings
-        item_fil_emb = self.catweight * item_acc_all_embeddings + (1 - self.catweight) * item_div_all_embeddings
-        return lightgcn_acc_all_embeddings, lightgcn_div_all_embeddings,user_fil_emb,item_fil_emb
+        user_fil_emb = self.catweight * user_acc_all_embeddings + (1 - self.catweight) * user_nacc_all_embeddings
+        item_fil_emb = self.catweight * item_acc_all_embeddings + (1 - self.catweight) * item_nacc_all_embeddings
+        return lightgcn_acc_all_embeddings, lightgcn_nacc_all_embeddings,user_fil_emb,item_fil_emb
 
-    def Ssl_loss(self, acc_embedding, div_embedding, user, item):
+    def Ssl_loss(self, acc_embedding, nacc_embedding, user, item):
         acc_user_embeddings, acc_item_embeddings = torch.split(acc_embedding, [self.n_users, self.n_items])
-        div_user_embeddings_all, div_item_embeddings_all = torch.split(div_embedding,
+        nacc_user_embeddings_all, nacc_item_embeddings_all = torch.split(nacc_embedding,
                                                                                  [self.n_users, self.n_items])
 
         acc_user_embeddings = acc_user_embeddings[user]
-        div_user_embeddings = div_user_embeddings_all[user]
+        nacc_user_embeddings = nacc_user_embeddings_all[user]
         norm_user_emb1 = F.normalize(acc_user_embeddings)
-        norm_user_emb2 = F.normalize(div_user_embeddings)
-        norm_all_user_emb = F.normalize(div_user_embeddings_all)
+        norm_user_emb2 = F.normalize(nacc_user_embeddings)
+        norm_all_user_emb = F.normalize(nacc_user_embeddings_all)
         pos_score_user = torch.mul(norm_user_emb1, norm_user_emb2).sum(dim=1)
         ttl_score_user = torch.matmul(norm_user_emb1, norm_all_user_emb.transpose(0, 1))
         pos_score_user = torch.exp(pos_score_user / self.ssl_temp)
@@ -203,10 +203,10 @@ class MOGCL(GeneralRecommender):
         ssl_loss_user = -torch.log(pos_score_user / ttl_score_user).sum()
 
         acc_item_embeddings = acc_item_embeddings[item]
-        div_item_embeddings = div_item_embeddings_all[item]
+        nacc_item_embeddings = nacc_item_embeddings_all[item]
         norm_item_emb1 = F.normalize(acc_item_embeddings)
-        norm_item_emb2 = F.normalize(div_item_embeddings)
-        norm_all_item_emb = F.normalize(div_item_embeddings_all)
+        norm_item_emb2 = F.normalize(nacc_item_embeddings)
+        norm_all_item_emb = F.normalize(nacc_item_embeddings_all)
         pos_score_item = torch.mul(norm_item_emb1, norm_item_emb2).sum(dim=1)
         ttl_score_item = torch.matmul(norm_item_emb1, norm_all_item_emb.transpose(0, 1))
         pos_score_item = torch.exp(pos_score_item / self.ssl_temp)
@@ -225,8 +225,8 @@ class MOGCL(GeneralRecommender):
         pos_item = interaction[self.ITEM_ID]
         neg_item = interaction[self.NEG_ITEM_ID]
 
-        acc_all_embeddings, div_all_embeddings,user_all_embeddings,item_all_embeddings= self.forward()
-        ssl_loss = self.Ssl_loss(acc_all_embeddings, div_all_embeddings, user, pos_item)
+        acc_all_embeddings, nacc_all_embeddings,user_all_embeddings,item_all_embeddings= self.forward()
+        ssl_loss = self.Ssl_loss(acc_all_embeddings, nacc_all_embeddings, user, pos_item)
 
         u_embeddings = user_all_embeddings[user]
         pos_embeddings = item_all_embeddings[pos_item]
@@ -251,7 +251,7 @@ class MOGCL(GeneralRecommender):
         user = interaction[self.USER_ID]
         item = interaction[self.ITEM_ID]
 
-        acc_all_embeddings, div_all_embeddings, user_all_embeddings, item_all_embeddings = self.forward()
+        acc_all_embeddings, nacc_all_embeddings, user_all_embeddings, item_all_embeddings = self.forward()
         u_embeddings = user_all_embeddings[user]
         i_embeddings = item_all_embeddings[item]
         scores = torch.mul(u_embeddings, i_embeddings).sum(dim=1)
