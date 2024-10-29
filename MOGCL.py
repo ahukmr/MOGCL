@@ -41,11 +41,11 @@ class MOGCL(GeneralRecommender):
         self.n_layers = config['n_layers']
         self.reg_weight =  config['reg_weight']
         self.ssl_temp = config['ssl_temp']
-        self.ssl_reg = config['ssl_reg']
+        self.ssl_lambda = config['ssl_lambda']
         self.hyper_layers = config['hyper_layers']
         self.r = config['r']
-        self.ssl_alpha = config['ssl_alpha']
-        self.catweight = torch.tensor(config['catweight'])
+        self.ssl_beta = config['ssl_beta']
+        self.alpha = torch.tensor(config['alpha'])
 
         self.user_embedding = torch.nn.Embedding(num_embeddings=self.n_users, embedding_dim=self.latent_dim)
         self.item_embedding = torch.nn.Embedding(num_embeddings=self.n_items, embedding_dim=self.latent_dim)
@@ -181,8 +181,8 @@ class MOGCL(GeneralRecommender):
 
         user_nacc_all_embeddings, item_nacc_all_embeddings = torch.split(lightgcn_nacc_all_embeddings,
                                                                [self.n_users, self.n_items])
-        user_fil_emb = self.catweight * user_acc_all_embeddings + (1 - self.catweight) * user_nacc_all_embeddings
-        item_fil_emb = self.catweight * item_acc_all_embeddings + (1 - self.catweight) * item_nacc_all_embeddings
+        user_fil_emb = self.alpha * user_acc_all_embeddings + (1 - self.alpha) * user_nacc_all_embeddings
+        item_fil_emb = self.alpha * item_acc_all_embeddings + (1 - self.alpha) * item_nacc_all_embeddings
         return lightgcn_acc_all_embeddings, lightgcn_nacc_all_embeddings,user_fil_emb,item_fil_emb
 
     def Ssl_loss(self, acc_embedding, nacc_embedding, user, item):
@@ -214,7 +214,7 @@ class MOGCL(GeneralRecommender):
 
         ssl_loss_item = -torch.log(pos_score_item / ttl_score_item).sum()
 
-        ssl_loss = self.ssl_reg * (ssl_loss_user + self.ssl_alpha * ssl_loss_item)
+        ssl_loss = self.ssl_lambda * (ssl_loss_user + self.ssl_beta * ssl_loss_item)
         return ssl_loss
     def calculate_loss(self, interaction):
         # clear the storage variable when training
