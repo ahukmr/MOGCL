@@ -109,17 +109,13 @@ class MOGCL(GeneralRecommender):
         return SparseL
 
     def nacc_get_norm_adj_mat(self):
-        r"""Get the normalized interaction matrix of users and items.
-
-        Construct the square matrix from the training data and normalize it
-        using the laplace matrix.
+        r"""
 
 
-        .. math::
-            A_{hat} = D^{-r} \times A \times D^{-r}
+        math:
+            A_{hat} = D^{-r} \times A \times D^{-(1-r)}
 
-        Returns:
-            Sparse tensor of the normalized interaction matrix.
+    
         """
         # build adj matrix
         A = sp.dok_matrix((self.n_users + self.n_items, self.n_users + self.n_items), dtype=np.float32)
