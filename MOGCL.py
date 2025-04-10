@@ -116,7 +116,7 @@ class MOGCL(GeneralRecommender):
 
 
         .. math::
-            A_{hat} = D^{-0.5} \times A \times D^{-0.5}
+            A_{hat} = D^{-r} \times A \times D^{-r}
 
         Returns:
             Sparse tensor of the normalized interaction matrix.
